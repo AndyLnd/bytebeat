@@ -259,33 +259,38 @@ class BytebeatVisualizer {
     // Advance column pointer (wrapping)
     this.col = (this.col + count) % W;
 
-    // ── Waveform: similar approach ──
-    // Erase old waveform region
+    // ── Waveform: draw in the erased region, split at wrap boundary ──
     ctx.fillStyle = '#080c12';
     ctx.fillRect(this.col, TH, eraseW, WH);
     if (count > eraseW) {
       ctx.fillRect(0, TH, count - eraseW, WH);
     }
 
-    // Draw waveform line
-    ctx.strokeStyle = '#3fb950';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
     const midY = TH + WH / 2;
     const amp = WH / 2 - 3;
-    for (let i = 0; i < count; i++) {
-      const sample = this.sampleBuf[i];
-      const x = (this.col + i) % W;
-      const y = midY + ((sample - 128) / 128) * amp;
-      if (i === 0) {
-        // Move to previous position (one col left) for continuity
-        const prevX = (x - 1 + W) % W;
-        const prevSample = i > 0 ? this.sampleBuf[i - 1] : 128;
-        ctx.moveTo(prevX, midY + ((prevSample - 128) / 128) * amp);
+    ctx.strokeStyle = '#3fb950';
+    ctx.lineWidth = 1;
+
+    // Helper: draw a segment of the waveform
+    const drawSegment = (startX: number, bufOffset: number, segLen: number) => {
+      if (segLen < 2) return;
+      ctx.beginPath();
+      for (let i = 0; i < segLen; i++) {
+        const sample = this.sampleBuf[bufOffset + i];
+        const x = startX + i;
+        const y = midY + ((sample - 128) / 128) * amp;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
       }
-      ctx.lineTo(x, y);
+      ctx.stroke();
+    };
+
+    // Segment 1: from col to edge (or all if no wrap)
+    drawSegment(this.col, 0, eraseW);
+    // Segment 2: wrapped part from 0
+    if (count > eraseW) {
+      drawSegment(0, eraseW, count - eraseW);
     }
-    ctx.stroke();
 
     // Divider
     ctx.strokeStyle = '#1a2230';
