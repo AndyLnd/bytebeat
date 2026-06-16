@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 
 export default defineConfig({
-  base: '/bytebeat/',
+  base: './',
   server: {
     port: 8080,
     open: true,

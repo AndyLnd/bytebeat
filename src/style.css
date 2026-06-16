@@ -310,3 +310,16 @@ footer a:hover {
 .pitch-row.non-western .note {
   color: var(--text-dim);
 }
+
+/* ── Visualization Canvas ── */
+
+.viz-canvas {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 640 / 200;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #0a0e14;
+  display: block;
+  image-rendering: pixelated;
+}

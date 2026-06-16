@@ -30,6 +30,8 @@ class BytebeatEngine implements AudioEngine {
   private t: number = 0;
   private startTime: number = 0;
   private running: boolean = false;
+  /** Called after each chunk of samples is generated. Receives raw 8-bit values (0-255). */
+  public onSamples: ((raw: Uint8Array) => void) | null = null;
 
   /**
    * Compile expression into a function. Returns null on syntax error.
@@ -111,12 +113,17 @@ class BytebeatEngine implements AudioEngine {
       while (nextScheduleTime < now + lookAhead) {
         const buffer = ctx.createBuffer(1, chunkSize, ctx.sampleRate);
         const data = buffer.getChannelData(0);
+        const rawSamples = new Uint8Array(chunkSize);
 
         for (let i = 0; i < chunkSize; i++) {
           const raw = fn(this.t) & 0xFF;        // 8-bit unsigned (0–255)
           data[i] = (raw - 128) / 128 * this.volume; // center to [-1, 1]
+          rawSamples[i] = raw;
           this.t = (this.t + 1) | 0;            // 32-bit signed increment
         }
+
+        // Feed visualizer
+        if (this.onSamples) this.onSamples(rawSamples);
 
         const source = ctx.createBufferSource();
         source.buffer = buffer;
@@ -139,6 +146,178 @@ class BytebeatEngine implements AudioEngine {
     if (this.ctx) {
       this.ctx.close().catch(() => {});
       this.ctx = null;
+    }
+  }
+}
+
+// ── Visualization ──
+
+/**
+ * Renders bytebeat samples as a scrolling texture + waveform on a canvas.
+ * The texture view reveals Sierpinski/fractal patterns inherent in the
+ * bitwise formulas — this is the classic "bytebeat bitmap" visualization.
+ */
+class BytebeatVisualizer {
+  private canvas: HTMLCanvasElement;
+  private ctx: CanvasRenderingContext2D;
+  private sampleBuf: number[] = [];
+  private animId: number = 0;
+  private running: boolean = false;
+  private sampleRate: number = 22050;
+  private col: number = 0; // current column position (wraps)
+
+  private readonly W = 640;
+  private readonly TEX_H = 155;
+  private readonly WAVE_H = 45;
+
+  constructor(canvas: HTMLCanvasElement) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+    canvas.width = this.W;
+    canvas.height = this.TEX_H + this.WAVE_H;
+    this.clear();
+  }
+
+  setRate(rate: number): void {
+    this.sampleRate = rate;
+  }
+
+  /** Called by the audio engine with raw 8-bit samples. */
+  feed(raw: Uint8Array): void {
+    const MAX = this.W * 20;
+    if (this.sampleBuf.length > MAX) {
+      this.sampleBuf.splice(0, this.sampleBuf.length - MAX / 2);
+    }
+    for (let i = 0; i < raw.length; i++) {
+      this.sampleBuf.push(raw[i]);
+    }
+  }
+
+  start(): void {
+    if (this.running) return;
+    this.running = true;
+    this.col = 0;
+    this.loop();
+  }
+
+  stop(): void {
+    this.running = false;
+    cancelAnimationFrame(this.animId);
+    this.sampleBuf = [];
+    this.clear();
+  }
+
+  private clear(): void {
+    this.ctx.fillStyle = '#080c12';
+    this.ctx.fillRect(0, 0, this.W, this.TEX_H + this.WAVE_H);
+  }
+
+  private loop(): void {
+    if (!this.running) return;
+    this.animId = requestAnimationFrame(() => this.loop());
+    this.draw();
+  }
+
+  private draw(): void {
+    const ctx = this.ctx;
+    const W = this.W;
+    const TH = this.TEX_H;
+    const WH = this.WAVE_H;
+
+    const samplesPerFrame = Math.max(1, Math.round(this.sampleRate / 60));
+    const count = Math.min(this.sampleBuf.length, samplesPerFrame);
+    if (count < 1) return;
+
+    // ── Texture: draw columns at current position, wrapping ──
+    // First, draw background over the region we're about to overwrite
+    // (erase old content that's W columns old)
+    const eraseW = Math.min(count, W - this.col);
+    ctx.fillStyle = '#080c12';
+    ctx.fillRect(this.col, 0, eraseW, TH);
+    if (count > eraseW) {
+      ctx.fillRect(0, 0, count - eraseW, TH);
+    }
+
+    // Draw new phosphor columns
+    const imgData = ctx.getImageData(this.col, 0, eraseW, TH);
+    const px1 = imgData.data;
+    for (let i = 0; i < eraseW; i++) {
+      this.drawDash(px1, i, eraseW, TH, this.sampleBuf[i]);
+    }
+    ctx.putImageData(imgData, this.col, 0);
+
+    if (count > eraseW) {
+      const wrapW = count - eraseW;
+      const imgData2 = ctx.getImageData(0, 0, wrapW, TH);
+      const px2 = imgData2.data;
+      for (let i = 0; i < wrapW; i++) {
+        this.drawDash(px2, i, wrapW, TH, this.sampleBuf[eraseW + i]);
+      }
+      ctx.putImageData(imgData2, 0, 0);
+    }
+
+    // Advance column pointer (wrapping)
+    this.col = (this.col + count) % W;
+
+    // ── Waveform: similar approach ──
+    // Erase old waveform region
+    ctx.fillStyle = '#080c12';
+    ctx.fillRect(this.col, TH, eraseW, WH);
+    if (count > eraseW) {
+      ctx.fillRect(0, TH, count - eraseW, WH);
+    }
+
+    // Draw waveform line
+    ctx.strokeStyle = '#3fb950';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    const midY = TH + WH / 2;
+    const amp = WH / 2 - 3;
+    for (let i = 0; i < count; i++) {
+      const sample = this.sampleBuf[i];
+      const x = (this.col + i) % W;
+      const y = midY + ((sample - 128) / 128) * amp;
+      if (i === 0) {
+        // Move to previous position (one col left) for continuity
+        const prevX = (x - 1 + W) % W;
+        const prevSample = i > 0 ? this.sampleBuf[i - 1] : 128;
+        ctx.moveTo(prevX, midY + ((prevSample - 128) / 128) * amp);
+      }
+      ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+
+    // Divider
+    ctx.strokeStyle = '#1a2230';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, TH);
+    ctx.lineTo(W, TH);
+    ctx.stroke();
+
+    this.sampleBuf.splice(0, count);
+  }
+
+  /** Draw a phosphor dash for one sample into image data. */
+  private drawDash(px: Uint8ClampedArray, i: number, stride: number, TH: number, sample: number): void {
+    const y = Math.floor((255 - sample) / 255 * (TH - 1));
+    const lum = Math.floor(30 + (sample / 255) * 220);
+
+    const dashH = 8;
+    const y0 = Math.max(0, y - 2);
+    const y1 = Math.min(TH - 1, y + dashH - 3);
+
+    for (let dy = y0; dy <= y1; dy++) {
+      const dist = Math.abs(dy - y);
+      const glow = dist <= 1 ? 1.0 : dist === 2 ? 0.75 : dist === 3 ? 0.45 : 0.2;
+      const g = Math.floor(lum * glow);
+      const r = Math.floor(g * 0.2);
+      const b = Math.floor(g * 0.15);
+      const idx = dy * stride * 4 + i * 4;
+      px[idx] = r;
+      px[idx + 1] = g;
+      px[idx + 2] = b;
+      px[idx + 3] = 255;
     }
   }
 }
@@ -335,6 +514,7 @@ const PRESETS: Preset[] = [
 
 class BytebeatUI {
   private engine: BytebeatEngine;
+  private visualizer: BytebeatVisualizer;
   private playing: boolean = false;
 
   // DOM elements
@@ -352,10 +532,14 @@ class BytebeatUI {
   private pitchToggle!: HTMLButtonElement;
   private pitchBody!: HTMLDivElement;
   private pitchGrid!: HTMLDivElement;
+  private vizCanvas!: HTMLCanvasElement;
 
   constructor() {
     this.engine = new BytebeatEngine();
     this.cacheDom();
+    this.visualizer = new BytebeatVisualizer(this.vizCanvas);
+    // Wire engine → visualizer
+    this.engine.onSamples = (raw) => this.visualizer.feed(raw);
     this.bindEvents();
     this.populatePresets();
     this.buildPitchTable();
@@ -375,6 +559,7 @@ class BytebeatUI {
     this.pitchToggle = document.getElementById('pitch-toggle') as HTMLButtonElement;
     this.pitchBody = document.getElementById('pitch-body') as HTMLDivElement;
     this.pitchGrid = document.getElementById('pitch-grid') as HTMLDivElement;
+    this.vizCanvas = document.getElementById('viz') as HTMLCanvasElement;
   }
 
   private bindEvents(): void {
@@ -387,6 +572,7 @@ class BytebeatUI {
 
     this.rateSelect.addEventListener('change', () => {
       this.engine.setSampleRate(parseInt(this.rateSelect.value, 10));
+      this.visualizer.setRate(parseInt(this.rateSelect.value, 10));
       this.buildPitchTable(); // refresh Hz values in tooltips
       this.updateURL();
     });
@@ -527,6 +713,7 @@ class BytebeatUI {
     this.engine.setSampleRate(parseInt(this.rateSelect.value, 10));
     this.engine.setVolume(parseInt(this.volumeSlider.value, 10) / 100);
 
+    this.visualizer.setRate(parseInt(this.rateSelect.value, 10));
     this.engine.start();
     this.playing = true;
     this.playBtn.textContent = '⏹';
@@ -536,11 +723,15 @@ class BytebeatUI {
     // Update time display
     this.startTimeUpdate();
 
+    // Start visualization
+    this.visualizer.start();
+
     this.updateURL();
   }
 
   private stop(): void {
     this.engine.stop();
+    this.visualizer.stop();
     this.playing = false;
     this.playBtn.textContent = '▶';
     this.playBtn.classList.remove('playing');
