@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bytebeat Player</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1>Bytebeat</h1>
+      <span class="subtitle">algorithmic one-liner synthesizer</span>
+    </header>
+
+    <main>
+      <section class="expression-section">
+        <label for="expr">Expression</label>
+        <div class="input-group">
+          <input
+            id="expr"
+            type="text"
+            spellcheck="false"
+            autocomplete="off"
+            placeholder="t * ((t&gt;&gt;12|t&gt;&gt;8)&amp;(63&amp;t&gt;&gt;4))"
+          />
+          <button id="play-btn" title="Play / Stop">▶</button>
+        </div>
+        <div class="expr-error" id="expr-error"></div>
+      </section>
+
+      <section class="controls">
+        <div class="control">
+          <label for="rate">Sample Rate</label>
+          <select id="rate">
+            <option value="8000">8 kHz</option>
+            <option value="11025">11.025 kHz</option>
+            <option value="22050" selected>22.05 kHz</option>
+            <option value="32000">32 kHz</option>
+            <option value="44100">44.1 kHz</option>
+          </select>
+        </div>
+
+        <div class="control">
+          <label for="volume">Volume</label>
+          <input type="range" id="volume" min="0" max="100" value="50" />
+          <span id="volume-val">50%</span>
+        </div>
+
+        <div class="control">
+          <label for="preset">Presets</label>
+          <select id="preset">
+            <option value="">— choose —</option>
+          </select>
+        </div>
+      </section>
+
+      <section class="info-bar" id="info-bar">
+        <span id="time-display">00:00</span>
+        <span id="t-display">t = 0</span>
+      </section>
+    </main>
+
+    <footer>
+      <p>
+        Based on <a href="https://countercomplex.blogspot.com/2011/10/algorithmic-symphonies-from-one-line-of.html" target="_blank">viznut's "Algorithmic symphonies from one line of code"</a>
+        &mdash; bytebeat community project.
+      </p>
+    </footer>
+
+    <section class="pitch-panel" id="pitch-panel">
+      <button class="pitch-toggle" id="pitch-toggle" title="Show pitch reference table">
+        🎹 Pitch Reference
+        <span class="toggle-arrow">▶</span>
+      </button>
+      <div class="pitch-body" id="pitch-body" hidden>
+        <p class="pitch-info">
+          Base frequency = <em>sample rate ÷ 256</em>.
+          Each multiplier <em>n</em> produces pitch at <em>n × base</em> Hz.
+          The semitones and note names below use 12-TET, centered on C as the base pitch.
+          <strong>Gray rows</strong> have no close Western equivalent (≥25¢ deviation).
+        </p>
+        <div class="pitch-grid" id="pitch-grid"></div>
+      </div>
+    </section>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
